@@ -313,6 +313,15 @@ for ii in range(args.itr):
             scaler = test_data.scaler if hasattr(test_data, 'scaler') else None
             
             def inverse_transform_array(data_arr):
+                """
+                Attempt to inverse-transform a prediction array back to original feature scale, handling single-target outputs when the fitted scaler expects multiple features.
+                
+                Parameters:
+                    data_arr (np.ndarray): Array of shape (n_samples, n_features_pred) containing model outputs to inverse-transform. For multi-step forecasts this typically has shape (n_steps, pred_features).
+                
+                Returns:
+                    np.ndarray: The inverse-transformed array. If a scaler or test_data inverse_transform is available, returns the reconstructed values; otherwise returns the input unchanged. When the scaler was fitted on multiple features but `data_arr` contains only the target column, returns the last column after reconstructing a dummy multi-feature array and applying the inverse transform.
+                """
                 if scaler is not None and hasattr(scaler, 'scale_'):
                     num_scaler_features = scaler.scale_.shape[0]
                     # 针对 MS 任务（模型输出单变量，但 scaler 是多变量拟合的）

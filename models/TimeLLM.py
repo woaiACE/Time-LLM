@@ -199,6 +199,18 @@ class Model(nn.Module):
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
 
+        """
+        Construct a denormalized multivariate forecast from encoder inputs using LLM-augmented patch embeddings and a projection head.
+        
+        Parameters:
+            x_enc (torch.Tensor): Encoder input tensor of shape (B, T, N) representing B batches, T time steps, and N variables.
+            x_mark_enc: Accepted for API compatibility but not used by this implementation.
+            x_dec: Accepted for API compatibility but not used by this implementation.
+            x_mark_dec: Accepted for API compatibility but not used by this implementation.
+        
+        Returns:
+            torch.Tensor: Denormalized predictions with shape (B, pred_len, N), where pred_len is the model's configured forecast horizon.
+        """
         x_enc = self.normalize_layers(x_enc, 'norm')
 
         B, T, N = x_enc.size()
