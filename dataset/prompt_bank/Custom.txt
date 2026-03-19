@@ -1,0 +1,1 @@
+The dataset comprises daily customer-service metrics with columns call_volume, tickets_received, and tickets_resolved. The task is to forecast these daily metrics for the next 30 days.

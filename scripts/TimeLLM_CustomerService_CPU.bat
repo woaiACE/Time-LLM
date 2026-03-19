@@ -1,4 +1,5 @@
 @echo off
+set HF_ENDPOINT=https://hf-mirror.com
 setlocal ENABLEDELAYEDEXPANSION
 chcp 65001 > nul
 
@@ -7,7 +8,7 @@ chcp 65001 > nul
 :: 预测目标：使用过去 90 天数据，预测未来 30 天的指标。
 
 set model_name=TimeLLM
-set train_epochs=10
+set train_epochs=1
 set learning_rate=0.01
 
 :: 轻量级 GPT-2 模型设置
@@ -17,7 +18,7 @@ set d_llm=768
 set d_model=16
 set d_ff=32
 
-set comment=TimeLLM-CustomerService-30Days-CPU
+set comment=TimeLLM-CustomerService-30Days-CPU-FastTest
 
 echo ==========================================================
 echo     📊 开始预测 客服工单数据 (未来 30 天) 📊
@@ -31,6 +32,7 @@ python run_main.py ^
   --data_path cleaned_merged_data.csv ^
   --model_id CustomerService_90_30 ^
   --model %model_name% ^
+  --num_workers 0 ^
   --data Custom ^
   --features M ^
   --target tickets_resolved ^
