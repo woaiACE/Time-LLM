@@ -1,5 +1,6 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
+chcp 65001 > nul
 
 :: --- 专为 客服工单数据 (按日统计) / CPU 环境定制的预测脚本 (Windows 专用) ---
 :: 适用数据：cleaned_merged_data.csv (date, call_volume, tickets_received, tickets_resolved)
