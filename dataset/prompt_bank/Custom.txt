@@ -1,0 +1,1 @@
+The dataset comprises daily time-series metrics for customer service operations, specifically tracking open tickets, resolved tickets, and inbound call volumes. The task is to forecast the daily volume of open tickets and inbound calls for the next 30 days.

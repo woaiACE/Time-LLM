@@ -269,8 +269,116 @@ for ii in range(args.itr):
         else:
             accelerator.print('Updating learning rate to {}'.format(scheduler.get_last_lr()[0]))
 
+    # ==========================================================
+    # 🛠️ 新增逻辑：训练结束后加载最佳模型，预测并保存为 CSV
+    # ==========================================================
+    best_model_path = path + '/' + 'checkpoint'
+    accelerator.wait_for_everyone()
+    if os.path.exists(best_model_path):
+        accelerator.print(f"\n正在加载最优模型，准备导出预测数据...")
+        unwrapped_model = accelerator.unwrap_model(model)
+        unwrapped_model.load_state_dict(torch.load(best_model_path, map_location=lambda storage, loc: storage))
+        model.eval()
+        
+        preds, trues = [], []
+        with torch.no_grad():
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
+                batch_x = batch_x.float().to(accelerator.device)
+                batch_y = batch_y.float().to(accelerator.device)
+                batch_x_mark = batch_x_mark.float().to(accelerator.device)
+                batch_y_mark = batch_y_mark.float().to(accelerator.device)
+                
+                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(accelerator.device)
+                
+                if args.use_amp:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0] if args.output_attention else model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                else:
+                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0] if args.output_attention else model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                
+                f_dim = -1 if args.features == 'MS' else 0
+                preds.append(outputs[:, -args.pred_len:, f_dim:].detach().cpu().numpy())
+                trues.append(batch_y[:, -args.pred_len:, f_dim:].detach().cpu().numpy())
+                
+        if accelerator.is_local_main_process:
+            import pandas as pd
+            preds = np.concatenate(preds, axis=0)
+            trues = np.concatenate(trues, axis=0)
+            
+            pred_future = preds[-1]
+            true_reference = trues[-1]
+            
+            # --- 🔮 新增：逆归一化（将小数还原为真实的工单量、电话量） ---
+            scaler = test_data.scaler if hasattr(test_data, 'scaler') else None
+            
+            def inverse_transform_array(data_arr):
+                if scaler is not None and hasattr(scaler, 'scale_'):
+                    num_scaler_features = scaler.scale_.shape[0]
+                    # 针对 MS 任务（模型输出单变量，但 scaler 是多变量拟合的）
+                    if data_arr.shape[-1] == 1 and num_scaler_features > 1:
+                        dummy = np.zeros((data_arr.shape[0], num_scaler_features))
+                        # 在大多数时序框架中，target 特征默认被放在最后一列
+                        dummy[:, -1] = data_arr[:, 0]
+                        if hasattr(test_data, 'inverse_transform'):
+                            dummy = test_data.inverse_transform(dummy)
+                        else:
+                            dummy = scaler.inverse_transform(dummy)
+                        return dummy[:, -1:]
+                
+                # M 或 S 任务的默认逆归一化
+                if hasattr(test_data, 'inverse_transform'):
+                    return test_data.inverse_transform(data_arr)
+                elif scaler is not None:
+                    return scaler.inverse_transform(data_arr)
+                return data_arr
+
+            pred_future = inverse_transform_array(pred_future)
+            true_reference = inverse_transform_array(true_reference)
+
+            # 尝试获取列名（加上 tickets_resolved 等表头）
+            cols = None
+            if hasattr(test_data, 'df_raw') and test_data.df_raw is not None:
+                cols = list(test_data.df_raw.columns[1:]) # 忽略第一列日期时间
+                # 如果只预测出 target 这一列，确保 DataFrame 表头也只有一项
+                if pred_future.shape[-1] == 1 and len(cols) > 1:
+                    cols = [args.target] if args.target in cols else [cols[-1]]
+
+            # 📅 新增：自动推导历史和未来的日期
+            future_dates = None
+            past_dates = None
+            if hasattr(test_data, 'df_raw') and test_data.df_raw is not None:
+                try:
+                    # 获取最后一条数据的真实日期
+                    last_date = pd.to_datetime(test_data.df_raw.iloc[-1, 0])
+                    freq_map = {'d': 'D', 'h': 'H', 't': 'min', 'm': 'MS'}
+                    pd_freq = freq_map.get(args.freq.lower(), 'D')
+                    
+                    # 往后生成 pred_len 天的连续日期
+                    future_dates = pd.date_range(start=last_date, periods=args.pred_len + 1, freq=pd_freq)[1:]
+                    past_dates = test_data.df_raw.iloc[-len(true_reference):, 0].values
+                except Exception as e:
+                    accelerator.print(f"日期生成提醒: {e}")
+
+            result_dir = './results/' + setting + '/'
+            os.makedirs(result_dir, exist_ok=True)
+            
+            # 保存为可读的真实业务数值
+            df_pred = pd.DataFrame(pred_future, columns=cols)
+            if future_dates is not None and len(future_dates) == len(df_pred):
+                df_pred.insert(0, 'date', future_dates) # 把日期插到第一列
+            df_pred.to_csv(result_dir + 'pred_future_30days.csv', index=False)
+            
+            df_true = pd.DataFrame(true_reference, columns=cols)
+            if past_dates is not None and len(past_dates) == len(df_true):
+                df_true.insert(0, 'date', past_dates)
+            df_true.to_csv(result_dir + 'true_past_reference.csv', index=False)
+            
+            accelerator.print(f"🎉 预测成功！未来30天的真实业务数值已保存至: {result_dir}pred_future_30days.csv")
+
 accelerator.wait_for_everyone()
 if accelerator.is_local_main_process:
-    path = './checkpoints'  # unique checkpoint saving path
-    del_files(path)  # delete checkpoint files
-    accelerator.print('success delete checkpoints')
+    # path = './checkpoints'  # unique checkpoint saving path
+    # del_files(path)  # delete checkpoint files
+    # accelerator.print('success delete checkpoints')
+    accelerator.print('训练结束，模型权重已保留在 checkpoints 目录中')
