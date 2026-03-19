@@ -100,8 +100,14 @@ parser.add_argument('--percent', type=int, default=100)
 
 args = parser.parse_args()
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
-accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+
+try:
+    import deepspeed
+    deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+except ImportError:
+    print("Warning: DeepSpeed is not installed. Running without DeepSpeed plugin (Perfect for CPU/Windows).")
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
 
 for ii in range(args.itr):
     # setting record of experiments
